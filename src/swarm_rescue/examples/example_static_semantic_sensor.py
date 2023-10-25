@@ -9,12 +9,11 @@ import random
 import sys
 from typing import List, Type
 
-from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
-from spg_overlay.entities.wounded_person import WoundedPerson
-
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
+from spg_overlay.entities.wounded_person import WoundedPerson
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.gui_map.closed_playground import ClosedPlayground
 from spg_overlay.gui_map.gui_sr import GuiSR
@@ -32,8 +31,8 @@ class MyDrone(DroneAbstract):
         """
         pass
 
-    def process_semantic_sensor(self, the_semantic_sensor):
-        detection_semantic = the_semantic_sensor.get_sensor_values()
+    def process_semantic_sensor(self):
+        detection_semantic = self.semantic_values()
 
         print("********************************************")
         if detection_semantic is not None:
@@ -52,7 +51,7 @@ class MyDrone(DroneAbstract):
 
     def control(self):
         if self.identifier == 0:
-            self.process_semantic_sensor(self.semantic())
+            self.process_semantic_sensor()
 
 
 class MyMap(MapAbstract):
@@ -116,6 +115,7 @@ def main():
     playground = my_map.construct_playground(drone_type=MyDrone)
     gui = GuiSR(playground=playground,
                 the_map=my_map,
+                draw_semantic_rays=True,
                 use_keyboard=True,
                 use_mouse_measure=True,
                 enable_visu_noises=False,
