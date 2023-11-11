@@ -85,7 +85,7 @@ class MyDroneEval(DroneAbstract):
 
         self.persones_ranges = []
         for value in semantic_values:
-            if value.entity_type==DroneSemanticSensor.TypeEntity.WOUNDED_PERSON:
+            if value.entity_type==DroneSemanticSensor.TypeEntity.WOUNDED_PERSON or value.entity_type==DroneSemanticSensor.TypeEntity.DRONE or value.entity_type==DroneSemanticSensor.TypeEntity.GRASPED_WOUNDED_PERSON:
                 r = 12  # Radius of a person
                 alpha = np.arctan(r/value.distance)
                 self.persones_ranges.append((value.angle-alpha, value.angle+alpha))
@@ -98,7 +98,8 @@ class MyDroneEval(DroneAbstract):
         dist_min = np.min(dists[:, 1])
         dist_max = np.max(dists[:, 1])
 
-        distance_devant = min([x[1] for x in dists if -10<x[0]<10])
+        front_rays = [x[1] for x in dists if -10<x[0]<10]
+        distance_devant = min(front_rays) if len(front_rays)>0 else math.inf
         # toto = sum(lidar_values)
         # dists = np.array([2*angle*(lidar_values[angle+90]/toto) for angle in range(-90, 90)])
         # angle = dists.sum()
@@ -115,7 +116,7 @@ class MyDroneEval(DroneAbstract):
         side_vector = np.array([np.cos(self.estimated_angle+self.follow_left*np.pi/2), np.sin(self.estimated_angle+self.follow_left*np.pi/2)])
         k = 10
         alpha = 0*2*np.sqrt(k*self.base._mass)
-        stride += self.follow_left*k*np.sign(dist_min-30)*clamp((dist_min-30), -1, 1)**2-np.dot(side_vector, self.estimated_velocity)*alpha
+        stride += self.follow_left*k*np.sign(dist_min-40)*clamp((dist_min-40), -1, 1)**2-np.dot(side_vector, self.estimated_velocity)*alpha
         if distance_devant < 60:
             delta_dir += self.follow_left*90
             stride-=self.follow_left*1
@@ -139,7 +140,7 @@ class MyDroneEval(DroneAbstract):
         command = {"forward": 0.8,
                    "lateral": 0.0,
                    "rotation": 0.0,
-                   "grasper": 0}
+                   "grasper": 1.0}
 
         speed, angle, stride = self.process_lidar_sensor()
         self.measured_gps_position()
