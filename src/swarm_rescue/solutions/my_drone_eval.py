@@ -36,6 +36,7 @@ class MyDroneEval(DroneAbstract):
         self.walls_distances = []
         self.semantics = []
         self.grabbed_person = False
+        self.safe_zone = False
 
         self.state = "follow_wall"
 
@@ -64,7 +65,14 @@ class MyDroneEval(DroneAbstract):
                     self.grabbed_person = 1
         return (speed, angle, stride)
 
-    
+    def back_zone(self,speed,angle,stride):
+        for value in self.semantics:
+            if value.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER and self.grabbed_person==1 :
+                angle = value.angle
+                speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
+                if value.distance < 10:
+                    self.grabbed_person = 0
+        return (speed, angle, stride)
     def measured_velocity(self) -> Union[np.ndarray, None]:
         """
         Give the measured velocity of the drone in the two dimensions, in pixels per second
@@ -98,17 +106,20 @@ class MyDroneEval(DroneAbstract):
         self.walls_distances = np.array([(2*demi_angle, lidar_values[demi_angle+90]*coeff(demi_angle)) for demi_angle in range(-90, 90) if not self.is_person(2*demi_angle)])
     
     def update_semantic(self):
+        self.safe_zone = False
         self.semantics = self.semantic_values()
         self.people_ranges = []
         for value in self.semantics:
-            if value.entity_type==DroneSemanticSensor.TypeEntity.WOUNDED_PERSON or value.entity_type==DroneSemanticSensor.TypeEntity.GRASPED_WOUNDED_PERSON:
+            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON or value.entity_type==DroneSemanticSensor.TypeEntity.GRASPED_WOUNDED_PERSON:
                 r = 12  # Radius of a person
                 alpha = np.arctan(r/value.distance)
                 self.people_ranges.append((value.angle-alpha, value.angle+alpha))
-            if value.entity_type==DroneSemanticSensor.TypeEntity.DRONE:
+            if value.entity_type == DroneSemanticSensor.TypeEntity.DRONE:
                 r = 10  # Radius of a drone
                 alpha = np.arctan(r/value.distance)
                 self.people_ranges.append((value.angle-alpha, value.angle+alpha))
+            elif value.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
+                self.safe_zone = True
 
 
     def follow_wall(self):
@@ -132,7 +143,7 @@ class MyDroneEval(DroneAbstract):
         k = 10
         alpha = 0*2*np.sqrt(k*self.base._mass)
         stride += self.follow_left*k*np.sign(dist_min-20)*clamp((dist_min-20), -1, 1)**2-np.dot(side_vector, self.estimated_velocity)*alpha
-        if distance_devant < 60:
+        if distance_devant < 60 :
             delta_dir += self.follow_left*90
             stride-=self.follow_left*1
             speed = 0.1
@@ -165,17 +176,18 @@ class MyDroneEval(DroneAbstract):
                     if semantic.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and not self.grabbed_person:
                         self.state = "grab_person"
                         break
-            case "grab_person" :
+            case "grab_person":
                 if self.grabbed_person==0:
                     speed, angle, stride = self.grab_person()
                 else :
                     self.state = "follow_wall"
             case _:
                 self.state = "follow_wall"
+        speed, angle, stride = self.back_zone(speed,angle,stride)
         command = {"forward": clamp(speed, -1, 1),
                    "lateral": clamp(stride, -1, 1),
                    "rotation": clamp(angle, -1, 1),
-                   "grasper": 1.0}
+                   "grasper": self.grabbed_person}
 
         return command
     
