@@ -29,10 +29,12 @@ class MyDroneEval(DroneAbstract):
                          **kwargs)
         self.last_time = time.time()
         self.follow_left = 1
-        self.persones_ranges = []
+        self.people_ranges = []
         self.estimated_gps_position:np.ndarray = np.array([0, 0])
         self.estimated_velocity:np.ndarray = np.array([0, 0])
         self.estimated_angle:float = 0
+        self.walls_distances = []
+        self.semantics = []
 
     def define_message_for_all(self):
         """
@@ -42,7 +44,7 @@ class MyDroneEval(DroneAbstract):
 
     def is_person(self, angle_deg: float) -> bool:
         angle_rad = angle_deg/180*np.pi
-        for person_range in self.persones_ranges:
+        for person_range in self.people_ranges:
             if person_range[0] < angle_rad < person_range[1]:
                 return True
         return False
@@ -74,37 +76,34 @@ class MyDroneEval(DroneAbstract):
             velocity = self.measured_velocity()
             if velocity is not None:
                 self.estimated_velocity = velocity
-
-
-    def process_lidar_sensor(self):
-        """
-        Returns the direction of the largest free zone
-        """
+    
+    def update_distances(self):
         lidar_values = self.lidar_values()
-        semantic_values = self.semantic_values()
-
-        self.persones_ranges = []
-        for value in semantic_values:
-            if value.entity_type==DroneSemanticSensor.TypeEntity.WOUNDED_PERSON or value.entity_type==DroneSemanticSensor.TypeEntity.DRONE or value.entity_type==DroneSemanticSensor.TypeEntity.GRASPED_WOUNDED_PERSON:
+        self.walls_distances = np.array([(2*demi_angle, lidar_values[demi_angle+90]*coeff(demi_angle)) for demi_angle in range(-90, 90) if not self.is_person(2*demi_angle)])
+    
+    def update_semantic(self):
+        self.semantics = self.semantic_values()
+        self.people_ranges = []
+        for value in self.semantics:
+            if value.entity_type==DroneSemanticSensor.TypeEntity.WOUNDED_PERSON or value.entity_type==DroneSemanticSensor.TypeEntity.GRASPED_WOUNDED_PERSON:
                 r = 12  # Radius of a person
                 alpha = np.arctan(r/value.distance)
-                self.persones_ranges.append((value.angle-alpha, value.angle+alpha))
+                self.people_ranges.append((value.angle-alpha, value.angle+alpha))
+            if value.entity_type==DroneSemanticSensor.TypeEntity.DRONE:
+                r = 10  # Radius of a drone
+                alpha = np.arctan(r/value.distance)
+                self.people_ranges.append((value.angle-alpha, value.angle+alpha))
 
-        if lidar_values is None:
-            return 0
-        
-        dists = np.array([(2*demi_angle, lidar_values[demi_angle+90]*coeff(demi_angle)) for demi_angle in range(-90, 90) if not self.is_person(2*demi_angle)])
 
-        dist_min = np.min(dists[:, 1])
-        dist_max = np.max(dists[:, 1])
+    def follow_wall(self):
+        dist_min = np.min(self.walls_distances[:, 1])
+        # dist_max = np.max(self.walls_distances[:, 1])
 
-        front_rays = [x[1] for x in dists if -10<x[0]<10]
+        front_rays = [x[1] for x in self.walls_distances if -10<x[0]<10]
         distance_devant = min(front_rays) if len(front_rays)>0 else math.inf
-        # toto = sum(lidar_values)
-        # dists = np.array([2*angle*(lidar_values[angle+90]/toto) for angle in range(-90, 90)])
-        # angle = dists.sum()
-        angle_min = dists[np.argmin(dists[:,1])][0]
-        dist_min = np.min(dists[:,1])
+
+        angle_min = self.walls_distances[np.argmin(self.walls_distances[:,1])][0]
+        dist_min = np.min(self.walls_distances[:,1])
 
         if time.time() - self.last_time > 0.2 or dist_min > 80:
             self.follow_left = np.sign(angle_min)
@@ -116,7 +115,7 @@ class MyDroneEval(DroneAbstract):
         side_vector = np.array([np.cos(self.estimated_angle+self.follow_left*np.pi/2), np.sin(self.estimated_angle+self.follow_left*np.pi/2)])
         k = 10
         alpha = 0*2*np.sqrt(k*self.base._mass)
-        stride += self.follow_left*k*np.sign(dist_min-40)*clamp((dist_min-40), -1, 1)**2-np.dot(side_vector, self.estimated_velocity)*alpha
+        stride += self.follow_left*k*np.sign(dist_min-20)*clamp((dist_min-20), -1, 1)**2-np.dot(side_vector, self.estimated_velocity)*alpha
         if distance_devant < 60:
             delta_dir += self.follow_left*90
             stride-=self.follow_left*1
@@ -137,31 +136,15 @@ class MyDroneEval(DroneAbstract):
         The Drone will move forward and turn for a random angle when an obstacle is hit
         """
         self.update_position()
-        command = {"forward": 0.8,
-                   "lateral": 0.0,
-                   "rotation": 0.0,
+        self.update_distances()
+        self.update_semantic()
+
+        speed, angle, stride = self.follow_wall()
+        command = {"forward": speed,
+                   "lateral": stride,
+                   "rotation": angle,
                    "grasper": 1.0}
 
-        speed, angle, stride = self.process_lidar_sensor()
-        self.measured_gps_position()
-        command["forward"] = speed
-        command["rotation"] = angle
-        command["lateral"] = stride
-
-        # measured_angle = 0
-        # if self.measured_compass_angle() is not None:
-        #     measured_angle = self.measured_compass_angle()
-
-        # diff_angle = normalize_angle(self.angleStopTurning - measured_angle)
-        # if self.isTurning and abs(diff_angle) < 0.2:
-        #     self.isTurning = False
-        #     self.counterStraight = 0
-        #     self.distStopStraight = random.uniform(10, 50)
-
-        # if self.isTurning:
-        #     return command_turn
-        # else:
-        #     return command_straight
         return command
     
     def draw_health(self):
