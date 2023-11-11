@@ -59,8 +59,7 @@ class MyDroneEval(DroneAbstract):
         for value in self.semantics:
             if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and self.grabbed_person==0 :
                 angle = value.angle
-                if value.distance < 50 :
-                    speed = 0.5
+                speed = np.pi/2/1+np.exp(value.distance/50)
                 if value.distance < 25 :
                     self.grabbed_person = 1
         return (speed, angle, stride)
@@ -148,6 +147,7 @@ class MyDroneEval(DroneAbstract):
 
         return (speed, angle, stride)
 
+
     def control(self):
         """
         The Drone will move forward and turn for a random angle when an obstacle is hit
@@ -165,9 +165,10 @@ class MyDroneEval(DroneAbstract):
                     if semantic.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and not self.grabbed_person:
                         self.state = "grab_person"
                         break
-            case "grab_person":
-                speed, angle, stride = self.grab_person()
-                if self.grabbed_person:
+            case "grab_person" :
+                if self.grabbed_person==0:
+                    speed, angle, stride = self.grab_person()
+                else :
                     self.state = "follow_wall"
             case _:
                 self.state = "follow_wall"
