@@ -33,7 +33,6 @@ class MyDroneEval(DroneAbstract):
         self.estimated_gps_position:np.ndarray = np.array([0, 0])
         self.estimated_velocity:np.ndarray = np.array([0, 0])
         self.estimated_angle:float = 0
-        self.grabbed=0
 
     def define_message_for_all(self):
         """
@@ -133,16 +132,6 @@ class MyDroneEval(DroneAbstract):
 
         return (speed, angle, stride)
 
-    def attraper_personne(self,command):
-        for value in self.semantic_values():
-            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and self.grabbed==0 :
-                command["rotation"] = value.angle
-                command["forward"] = 1
-                command["lateral"] = 0
-                if value.distance <50 :
-                    command["forward"]=0.5
-                if value.distance < 25 :
-                    self.grabbed=1
     def control(self):
         """
         The Drone will move forward and turn for a random angle when an obstacle is hit
@@ -151,7 +140,7 @@ class MyDroneEval(DroneAbstract):
         command = {"forward": 0.8,
                    "lateral": 0.0,
                    "rotation": 0.0,
-                   "grasper": self.grabbed}
+                   "grasper": 1.0}
 
         speed, angle, stride = self.process_lidar_sensor()
         self.measured_gps_position()
@@ -173,8 +162,6 @@ class MyDroneEval(DroneAbstract):
         #     return command_turn
         # else:
         #     return command_straight
-        self.attraper_personne(command)
-
         return command
     
     def draw_health(self):
