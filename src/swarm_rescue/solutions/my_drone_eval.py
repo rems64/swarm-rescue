@@ -35,6 +35,9 @@ class MyDroneEval(DroneAbstract):
         self.estimated_angle:float = 0
         self.walls_distances = []
         self.semantics = []
+        self.grabbed_person = False
+
+        self.state = "follow_wall"
 
     def define_message_for_all(self):
         """
@@ -48,6 +51,20 @@ class MyDroneEval(DroneAbstract):
             if person_range[0] < angle_rad < person_range[1]:
                 return True
         return False
+    
+    def grab_person(self):
+        speed = 1
+        angle = 0
+        stride = 0
+        for value in self.semantics:
+            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and self.grabbed_person==0 :
+                angle = value.angle
+                if value.distance < 50 :
+                    speed = 0.5
+                if value.distance < 25 :
+                    self.grabbed_person = 1
+        return (speed, angle, stride)
+
     
     def measured_velocity(self) -> Union[np.ndarray, None]:
         """
@@ -139,10 +156,24 @@ class MyDroneEval(DroneAbstract):
         self.update_distances()
         self.update_semantic()
 
-        speed, angle, stride = self.follow_wall()
-        command = {"forward": speed,
-                   "lateral": stride,
-                   "rotation": angle,
+        speed, angle, stride = 1.0, 0.0, 0.0
+
+        match self.state:
+            case "follow_wall":
+                speed, angle, stride = self.follow_wall()
+                for semantic in self.semantics:
+                    if semantic.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and not self.grabbed_person:
+                        self.state = "grab_person"
+                        break
+            case "grab_person":
+                speed, angle, stride = self.grab_person()
+                if self.grabbed_person:
+                    self.state = "follow_wall"
+            case _:
+                self.state = "follow_wall"
+        command = {"forward": clamp(speed, -1, 1),
+                   "lateral": clamp(stride, -1, 1),
+                   "rotation": clamp(angle, -1, 1),
                    "grasper": 1.0}
 
         return command
