@@ -4,11 +4,14 @@ import time
 from typing import Optional, Union
 import arcade
 import numpy as np
+# import matplotlib
+# matplotlib.use('Tkagg')
+import matplotlib.pyplot as plt
 
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.utils.misc_data import MiscData
-from spg_overlay.utils.constants import DRONE_INITIAL_HEALTH
+from spg_overlay.utils.constants import DRONE_INITIAL_HEALTH, MAX_RANGE_LIDAR_SENSOR
 
 def clamp(x, a, b):
     return max(min(x, b), a)
@@ -35,7 +38,17 @@ class MyDroneEval(DroneAbstract):
         self.estimated_angle:float = 0
         self.walls_distances = []
         self.semantics = []
+        self.points = []
+        self.walls = []
+        self.blobs = []
         self.grabbed_person = False
+
+        if True:
+            plt.figure("walls")
+            plt.axis((-300, 300, 0, 300))
+            plt.ion()
+            plt.show()
+
 
         self.state = "follow_wall"
 
@@ -155,6 +168,7 @@ class MyDroneEval(DroneAbstract):
         self.update_position()
         self.update_distances()
         self.update_semantic()
+        self.add_walls()
 
         speed, angle, stride = 1.0, 0.0, 0.0
 
@@ -177,6 +191,104 @@ class MyDroneEval(DroneAbstract):
                    "grasper": 1.0}
 
         return command
+    
+    def add_walls(self):
+        drone_position = self.true_position() + self._half_size_array
+        drone_angle = self.true_angle()
+        points = []
+        for angle, distance in self.walls_distances:
+            if distance < MAX_RANGE_LIDAR_SENSOR-10:
+                x = drone_position[0]+np.cos(np.deg2rad(angle)+drone_angle)*distance
+                y = drone_position[1]+np.sin(np.deg2rad(angle)+drone_angle)*distance
+                point = np.array([x, y])
+                further_enough = True
+                for point_other in self.points:
+                    if np.dot(point-point_other, point-point_other) < (20)**2:
+                        further_enough = False
+                        break
+                if further_enough:
+                    points.append(point)
+        for point in points:
+            self.points.append(point)
+            self.extend_blobs(point)
+    
+    def distance_to_blob(self, point, blob):
+        # # Manhatan distance
+        # if blob[0][0]<point[0]<blob[1][0] and blob[0][1]<point[1]<blob[1][1]:
+        #     return 0
+        # return min(abs(point[0]-blob[0][0])+abs(point[1]-blob[0][1]), abs(point[0]-blob[1][0])+abs(point[1]-blob[1][1]))
+        if blob[0][0]<point[0]<blob[1][0] and blob[0][1]<point[1]<blob[1][1]:
+            return 0
+        if abs(blob[0][0]-blob[1][0])>abs(blob[0][1]-blob[1][1]):
+            # Horizontal
+            if min(abs(point[0]-blob[0][0]), abs(point[0]-blob[1][0]))<min(abs(point[1]-blob[0][1]), abs(point[1]-blob[1][1])):
+                # Not aligned
+                return math.inf
+            else:
+                return min(abs(point[0]-blob[0][0]), abs(point[0]-blob[1][0]))
+        else:
+            # Vertical
+            if min(abs(point[1]-blob[0][1]), abs(point[1]-blob[1][1]))<min(abs(point[0]-blob[0][0]), abs(point[0]-blob[1][0])):
+                # Not aligned
+                return math.inf
+            else:
+                return min(abs(point[1]-blob[0][1]), abs(point[1]-blob[1][1]))
+    
+    def extend_blobs(self, point):
+        if len(self.blobs) == 0:
+            self.blobs.append([point, point.copy()])
+            return
+        min_distance = math.inf
+        closest_blob = None
+        for blob in self.blobs:
+            distance = self.distance_to_blob(point, blob)
+            if distance < 50 and distance < min_distance:
+                min_distance = distance
+                closest_blob = blob
+        if closest_blob is None:
+            self.blobs.append([point, point.copy()])
+            return
+        self.extend_blob(closest_blob, point)
+    
+    def distance_between_blobs(self, blob1, blob2):
+        # Distance between rects
+        if blob1[0][0]<blob2[1][0] and blob1[1][0]>blob2[0][0] and blob1[0][1]<blob2[1][1] and blob1[1][1]>blob2[0][1]:
+            return 0
+        return min(distance_to_segment(blob1[0], blob2[0], blob2[1]), distance_to_segment(blob1[1], blob2[0], blob2[1]), distance_to_segment(blob2[0], blob1[0], blob1[1]), distance_to_segment(blob2[1], blob1[0], blob1[1]))
+    
+    def extend_blob(self, blob, point):
+        blob[0] = np.minimum(blob[0], point)
+        blob[1] = np.maximum(blob[1], point)
+        to_remove = None
+        for (i, blob_other) in enumerate(self.blobs):
+            if blob_other is not blob and self.distance_between_blobs(blob, blob_other) < 50:
+                # Check alignment
+                blob[0] = np.minimum(blob[0], blob_other[0])
+                blob[1] = np.maximum(blob[1], blob_other[1])
+                to_remove = i
+                break
+        if to_remove is not None:
+            self.blobs.pop(to_remove)
+    
+    def extend_wall(self, wall, point):
+        # We extend the wall and keep it horizontal or vertical
+        if np.dot(point-wall[0], wall[1]-wall[0]) or np.dot(point-wall[1], wall[0]-wall[1]):
+            return
+        if np.dot(point-wall[0], point-wall[0]) > np.dot(point-wall[1], point-wall[1]):
+            if abs(wall[0][0]-point[0]) > abs(wall[0][1]-point[1]):
+                point[1] = wall[0][1]
+            else:
+                point[0] = wall[0][0]
+        else:
+            if abs(wall[1][0]-point[0]) > abs(wall[1][1]-point[1]):
+                point[1] = wall[1][1]
+            else:
+                point[0] = wall[1][0]
+        wall[0] = point
+        # if abs(wall[0][0]-wall[1][0]) > abs(wall[0][1]-wall[1][1]):
+        #     wall[0][1] = wall[1][1]
+        # else:
+        #     wall[0][0] = wall[1][0]
     
     def draw_health(self):
         position = self.true_position() + self._half_size_array
@@ -202,3 +314,32 @@ class MyDroneEval(DroneAbstract):
         self.draw_estimated_position()
         self.draw_wall_side()
         self.draw_health()
+    
+    def display(self):
+        DroneAbstract.display(self)
+        self.display_walls()
+
+    def display_walls(self):
+        if self.lidar_values() is not None:
+            plt.figure("walls")
+            plt.cla()
+            plt.axis((-30, 1000, -30, 1000))
+            plt.plot([x[0] for x in self.points], [x[1] for x in self.points], "o", markersize=0.5, color="blue")
+            for wall in self.walls:
+                plt.plot([wall[0][0], wall[1][0]], [wall[0][1], wall[1][1]], "-", color="black", linewidth=2)
+            for blob in self.blobs:
+                plt.plot([blob[0][0], blob[0][0], blob[1][0], blob[1][0], blob[0][0]], [blob[0][1], blob[1][1], blob[1][1], blob[0][1], blob[0][1]], "-", color="red", linewidth=2)
+            # plt.plot([100, 100], [500, 100], "-", linewidth=2)
+            # plt.plot([100, 500], [100, 100], "-", linewidth=2)
+            plt.grid(False)
+            # plt.draw()
+            # plt.show()
+            plt.pause(0.0001)
+
+def distance_to_segment(p, v, w):
+    vw = w-v
+    l2 = np.dot(vw, vw)
+    if (l2 == 0.0): return np.linalg.norm(p-v)
+    t = max(0, min(1, np.dot(p - v, w - v) / l2))
+    projection = v + t * (w - v)
+    return np.linalg.norm(p-projection)

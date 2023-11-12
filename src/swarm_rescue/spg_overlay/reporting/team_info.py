@@ -13,7 +13,7 @@ class TeamInfo:
     def __init__(self):
         yml_file_name = 'team_info.yml'
 
-        with open(os.path.join(os.path.dirname(__file__), '../..', 'solutions', yml_file_name), 'r') as yaml_file:
+        with open(os.path.join(os.path.dirname(__file__), '../..', 'solutions', yml_file_name), 'r', encoding='utf8') as yaml_file:
             config = yaml.load(yaml_file, Loader=yaml.FullLoader)
 
         self.team_number = int(config.get("team_number"))

@@ -1,6 +1,8 @@
 import gc
 from typing import Tuple
-
+import matplotlib
+# matplotlib.use('Qt5agg')
+matplotlib.use('Tkagg')
 from spg_overlay.entities.sensor_disablers import ZoneType
 from spg_overlay.utils.constants import DRONE_INITIAL_HEALTH
 from spg_overlay.reporting.evaluation import EvalConfig, EvalPlan, ZonesConfig
@@ -56,6 +58,7 @@ class Launcher:
         self.eval_plan = EvalPlan()
 
         zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
+        zones_config: ZonesConfig = ()
         eval_config = EvalConfig(map_type=MyMapTestNoGPS, nb_rounds=1, config_weight=1, zones_config=zones_config)
         self.eval_plan.add(eval_config=eval_config)
 
