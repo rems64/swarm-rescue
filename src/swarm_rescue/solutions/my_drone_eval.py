@@ -37,9 +37,8 @@ class MyDroneEval(DroneAbstract):
         self.semantics = []
         self.grabbed_person = False
         self.safe_zone = False
-
         self.state = "follow_wall"
-
+        self.pos_safe_zone = self.estimated_gps_position
     def define_message_for_all(self):
         """
         Here, we don't need communication...
@@ -57,22 +56,32 @@ class MyDroneEval(DroneAbstract):
         speed = 1
         angle = 0
         stride = 0
+        L=[]
         for value in self.semantics:
-            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and self.grabbed_person==0 :
-                angle = value.angle
-                speed = np.pi/2/1+np.exp(value.distance/50)
-                if value.distance < 25 :
-                    self.grabbed_person = 1
+            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and self.grabbed_person==0:
+                L.append((value.distance, value.angle))
+        if L != []:
+            speed, angle = min(L)
+            if speed < 25:
+                self.grabbed_person = True
+            stride = angle
+            speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
         return (speed, angle, stride)
 
     def back_zone(self,speed,angle,stride):
+        L=[]
         for value in self.semantics:
             if value.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER and self.grabbed_person==1 :
-                angle = value.angle
-                speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
-                if value.distance < 10:
-                    self.grabbed_person = 0
+                L.append((value.distance,value.angle))
+        if L!=[]:
+            speed,angle=min(L)
+            if speed < 30:
+                self.grabbed_person = False
+                self.safe_zone = False
+            stride=angle
+            speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
         return (speed, angle, stride)
+
     def measured_velocity(self) -> Union[np.ndarray, None]:
         """
         Give the measured velocity of the drone in the two dimensions, in pixels per second
