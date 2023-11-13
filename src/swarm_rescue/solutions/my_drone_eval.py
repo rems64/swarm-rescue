@@ -13,6 +13,9 @@ from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.utils.misc_data import MiscData
 from spg_overlay.utils.constants import DRONE_INITIAL_HEALTH, MAX_RANGE_LIDAR_SENSOR
 
+
+WALL_POINTS_DISTANCE = 50
+
 def clamp(x, a, b):
     return max(min(x, b), a)
 
@@ -39,6 +42,7 @@ class MyDroneEval(DroneAbstract):
         self.walls_distances = []
         self.semantics = []
         self.points = []
+        self.points_walls = []
         self.walls = []
         self.blobs = []
         self.grabbed_person = False
@@ -146,7 +150,7 @@ class MyDroneEval(DroneAbstract):
         k = 10
         alpha = 0*2*np.sqrt(k*self.base._mass)
         stride += self.follow_left*k*np.sign(dist_min-20)*clamp((dist_min-20), -1, 1)**2-np.dot(side_vector, self.estimated_velocity)*alpha
-        if distance_devant < 60:
+        if distance_devant < (120 if self.grabbed_person else 60):
             delta_dir += self.follow_left*90
             stride-=self.follow_left*1
             speed = 0.1
@@ -195,7 +199,10 @@ class MyDroneEval(DroneAbstract):
     def add_walls(self):
         drone_position = self.true_position() + self._half_size_array
         drone_angle = self.true_angle()
-        points = []
+        # Bon ça c'est la partie embêtante...on peut pas utiliser ça en fait
+        # drone_position = self.measured_gps_position() + self._half_size_array
+        # drone_angle = self.estimated_angle
+        start_index = len(self.points)
         for angle, distance in self.walls_distances:
             if distance < MAX_RANGE_LIDAR_SENSOR-10:
                 x = drone_position[0]+np.cos(np.deg2rad(angle)+drone_angle)*distance
@@ -203,92 +210,126 @@ class MyDroneEval(DroneAbstract):
                 point = np.array([x, y])
                 further_enough = True
                 for point_other in self.points:
-                    if np.dot(point-point_other, point-point_other) < (20)**2:
+                    if np.linalg.norm(point-point_other) < WALL_POINTS_DISTANCE:
                         further_enough = False
                         break
                 if further_enough:
-                    points.append(point)
-        for point in points:
-            self.points.append(point)
-            self.extend_blobs(point)
+                    self.points.append(point)
+                    self.points_walls.append(None)
+        
+        for i in range(start_index, len(self.points)):
+            point = self.points[i]
+            for j in range(0, i):
+                point_other = self.points[j]
+                if WALL_POINTS_DISTANCE/10 <= np.linalg.norm(point-point_other) < 2*WALL_POINTS_DISTANCE:
+                    print("Adding wall", i, j)
+                    self.insert_wall(i, j)
     
-    def distance_to_blob(self, point, blob):
-        # # Manhatan distance
-        # if blob[0][0]<point[0]<blob[1][0] and blob[0][1]<point[1]<blob[1][1]:
-        #     return 0
-        # return min(abs(point[0]-blob[0][0])+abs(point[1]-blob[0][1]), abs(point[0]-blob[1][0])+abs(point[1]-blob[1][1]))
-        if blob[0][0]<point[0]<blob[1][0] and blob[0][1]<point[1]<blob[1][1]:
-            return 0
-        if abs(blob[0][0]-blob[1][0])>abs(blob[0][1]-blob[1][1]):
-            # Horizontal
-            if min(abs(point[0]-blob[0][0]), abs(point[0]-blob[1][0]))<min(abs(point[1]-blob[0][1]), abs(point[1]-blob[1][1])):
-                # Not aligned
-                return math.inf
+    def merge_walls(self, i, j, i_point, index_2_point):
+        wall_1 = self.walls[i]
+        wall_2 = self.walls[j]
+        if wall_1[0]==i_point:
+            if wall_2[0]==index_2_point:
+                self.walls[i] = (wall_2[1], wall_1[1])
             else:
-                return min(abs(point[0]-blob[0][0]), abs(point[0]-blob[1][0]))
+                self.walls[i] = (wall_1[1], wall_2[0])
         else:
-            # Vertical
-            if min(abs(point[1]-blob[0][1]), abs(point[1]-blob[1][1]))<min(abs(point[0]-blob[0][0]), abs(point[0]-blob[1][0])):
-                # Not aligned
-                return math.inf
+            if wall_2[0]==index_2_point:
+                self.walls[i] = (wall_2[1], wall_1[0])
             else:
-                return min(abs(point[1]-blob[0][1]), abs(point[1]-blob[1][1]))
+                self.walls[i] = (wall_1[0], wall_2[0])
+        self.walls[j] = None
+        # Every point pointing to wall_2 should now point to wall_1
+        for k in range(len(self.points_walls)):
+            if self.points_walls[k] is None:
+                continue
+            for l in range(len(self.points_walls[k])):
+                if self.points_walls[k][l] == j:
+                    self.points_walls[k][l] = i
     
-    def extend_blobs(self, point):
-        if len(self.blobs) == 0:
-            self.blobs.append([point, point.copy()])
-            return
-        min_distance = math.inf
-        closest_blob = None
-        for blob in self.blobs:
-            distance = self.distance_to_blob(point, blob)
-            if distance < 50 and distance < min_distance:
-                min_distance = distance
-                closest_blob = blob
-        if closest_blob is None:
-            self.blobs.append([point, point.copy()])
-            return
-        self.extend_blob(closest_blob, point)
-    
-    def distance_between_blobs(self, blob1, blob2):
-        # Distance between rects
-        if blob1[0][0]<blob2[1][0] and blob1[1][0]>blob2[0][0] and blob1[0][1]<blob2[1][1] and blob1[1][1]>blob2[0][1]:
-            return 0
-        return min(distance_to_segment(blob1[0], blob2[0], blob2[1]), distance_to_segment(blob1[1], blob2[0], blob2[1]), distance_to_segment(blob2[0], blob1[0], blob1[1]), distance_to_segment(blob2[1], blob1[0], blob1[1]))
-    
-    def extend_blob(self, blob, point):
-        blob[0] = np.minimum(blob[0], point)
-        blob[1] = np.maximum(blob[1], point)
-        to_remove = None
-        for (i, blob_other) in enumerate(self.blobs):
-            if blob_other is not blob and self.distance_between_blobs(blob, blob_other) < 50:
-                # Check alignment
-                blob[0] = np.minimum(blob[0], blob_other[0])
-                blob[1] = np.maximum(blob[1], blob_other[1])
-                to_remove = i
-                break
-        if to_remove is not None:
-            self.blobs.pop(to_remove)
-    
-    def extend_wall(self, wall, point):
-        # We extend the wall and keep it horizontal or vertical
-        if np.dot(point-wall[0], wall[1]-wall[0]) or np.dot(point-wall[1], wall[0]-wall[1]):
-            return
-        if np.dot(point-wall[0], point-wall[0]) > np.dot(point-wall[1], point-wall[1]):
-            if abs(wall[0][0]-point[0]) > abs(wall[0][1]-point[1]):
-                point[1] = wall[0][1]
+    def insert_wall(self, i, j):
+        colinear_criteria = np.pi/8
+        potential_wall_direction = (self.points[j]-self.points[i])/np.linalg.norm(self.points[j]-self.points[i])
+        angle = np.angle(potential_wall_direction[0]+potential_wall_direction[1]*1j)
+        angle = np.round(angle/(np.pi/2))*np.pi/2
+        potential_wall_direction = np.array([np.cos(angle), np.sin(angle)])
+        if self.points_walls[i] is not None and self.points_walls[j] is not None:
+            # We aldready know the two ends
+            print("Two ends already known")
+            for k in range(len(self.points_walls[i])):
+                for l in range(len(self.points_walls[j])):
+                    if self.points_walls[i][k] == self.points_walls[j][l]:
+                        # The two ends are already connected
+                        return
+            # We merge the two walls if they are colinear enough
+            for k in range(len(self.points_walls[i])):
+                for l in range(len(self.points_walls[j])):
+                        wall_1 = self.walls[self.points_walls[i][k]]
+                        wall_2 = self.walls[self.points_walls[j][l]]
+                        wall_1_dir = self.points[wall_1[1]]-self.points[wall_1[0]]
+                        wall_1_dir /= np.linalg.norm(wall_1_dir)
+                        wall_2_dir = self.points[wall_2[1]]-self.points[wall_2[0]]
+                        wall_2_dir /= np.linalg.norm(wall_2_dir)
+                        perpendicular = np.arccos(abs(np.dot(wall_1_dir, wall_2_dir))) > colinear_criteria
+                        if not perpendicular:
+                            print("Merging two walls")
+                            self.merge_walls(self.points_walls[i][k], self.points_walls[j][l], i, j)
+                            return
+            # We fallback to extending on either side
+        elif self.points_walls[i] is not None:
+            wall = self.walls[self.points_walls[i][0]]
+            wall_dir = self.points[wall[1]]-self.points[wall[0]]
+            wall_dir = wall_dir / np.linalg.norm(wall_dir)
+            # print(np.dot(potential_wall_direction, wall_dir))
+            perpendicular = np.arccos(abs(np.dot(potential_wall_direction, wall_dir))) > colinear_criteria
+            if wall[0]==i:
+                if perpendicular:
+                    self.walls.append((i, j))
+                    new_wall_id = len(self.walls)-1
+                    self.points_walls[j] = [new_wall_id]
+                    self.points_walls[i].append(new_wall_id)
+                else:
+                    self.walls[self.points_walls[i][0]] = (j, wall[1])
+                    self.points_walls[j] = self.points_walls[i]
             else:
-                point[0] = wall[0][0]
+                if perpendicular:
+                    self.walls.append((i, j))
+                    new_wall_id = len(self.walls)-1
+                    self.points_walls[j] = [new_wall_id]
+                    self.points_walls[i].append(new_wall_id)
+                else:
+                    self.walls[self.points_walls[i][0]] = (wall[0], j)
+                    self.points_walls[j] = self.points_walls[i]
+        elif self.points_walls[j] is not None:
+            wall = self.walls[self.points_walls[j][0]]
+            wall_dir = self.points[wall[1]]-self.points[wall[0]]
+            wall_dir /= np.linalg.norm(wall_dir)
+            # print(np.dot(potential_wall_direction, wall_dir))
+            perpendicular = np.arccos(abs(np.dot(potential_wall_direction, wall_dir))) > colinear_criteria
+            if wall[0]==j:
+                if perpendicular:
+                    self.walls.append((i, j))
+                    new_wall_id = len(self.walls)-1
+                    self.points_walls[i] = [new_wall_id]
+                    self.points_walls[j].append(new_wall_id)
+                else:
+                    self.walls[self.points_walls[j][0]] = (i, wall[1])
+                    self.points_walls[i] = self.points_walls[j]
+            else:
+                if perpendicular:
+                    self.walls.append((i, j))
+                    new_wall_id = len(self.walls)-1
+                    self.points_walls[i] = [new_wall_id]
+                    self.points_walls[j].append(new_wall_id)
+                else:
+                    self.walls[self.points_walls[j][0]] = (wall[0], i)
+                    self.points_walls[i] = self.points_walls[j]
         else:
-            if abs(wall[1][0]-point[0]) > abs(wall[1][1]-point[1]):
-                point[1] = wall[1][1]
-            else:
-                point[0] = wall[1][0]
-        wall[0] = point
-        # if abs(wall[0][0]-wall[1][0]) > abs(wall[0][1]-wall[1][1]):
-        #     wall[0][1] = wall[1][1]
-        # else:
-        #     wall[0][0] = wall[1][0]
+            new_wall_id = len(self.walls)
+            self.walls.append((i, j))
+            self.points_walls[i] = [new_wall_id]
+            self.points_walls[j] = [new_wall_id]
+
     
     def draw_health(self):
         position = self.true_position() + self._half_size_array
@@ -323,12 +364,17 @@ class MyDroneEval(DroneAbstract):
         if self.lidar_values() is not None:
             plt.figure("walls")
             plt.cla()
-            plt.axis((-30, 1000, -30, 1000))
+            plt.axis((-30, 1700, -30, 1200))
+            # plt.axis((-30, 900, -30, 600))
             plt.plot([x[0] for x in self.points], [x[1] for x in self.points], "o", markersize=0.5, color="blue")
+            # for (i, point) in enumerate(self.points_walls):
+            #     if point is not None:
+            #         for (j, wall) in enumerate(point):
+            #             plt.text(self.points[i][0], self.points[i][1]+j*40, "("+str(i)+") "+str(wall))
+            # print(len([x for x in self.walls if x is not None]))
             for wall in self.walls:
-                plt.plot([wall[0][0], wall[1][0]], [wall[0][1], wall[1][1]], "-", color="black", linewidth=2)
-            for blob in self.blobs:
-                plt.plot([blob[0][0], blob[0][0], blob[1][0], blob[1][0], blob[0][0]], [blob[0][1], blob[1][1], blob[1][1], blob[0][1], blob[0][1]], "-", color="red", linewidth=2)
+                if wall is not None:
+                    plt.plot([self.points[wall[0]][0], self.points[wall[1]][0]], [self.points[wall[0]][1], self.points[wall[1]][1]], "-", color="black", linewidth=0.5)
             # plt.plot([100, 100], [500, 100], "-", linewidth=2)
             # plt.plot([100, 500], [100, 100], "-", linewidth=2)
             plt.grid(False)

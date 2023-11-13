@@ -1,6 +1,7 @@
 import gc
 from typing import Tuple
 import matplotlib
+
 # matplotlib.use('Qt5agg')
 matplotlib.use('Tkagg')
 from spg_overlay.entities.sensor_disablers import ZoneType
@@ -18,6 +19,7 @@ from maps.map_final_2023 import MyMapFinal
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
 from maps.map_test_no_gps import MyMapTestNoGPS
+from maps.map_test_manywalls import MyMapManyWalls
 
 from solutions.my_drone_eval import MyDroneEval
 from solutions.my_drone_random import MyDroneRandom
@@ -60,6 +62,10 @@ class Launcher:
         zones_config: ZonesConfig = (ZoneType.NO_COM_ZONE, ZoneType.NO_GPS_ZONE, ZoneType.KILL_ZONE)
         zones_config: ZonesConfig = ()
         eval_config = EvalConfig(map_type=MyMapTestNoGPS, nb_rounds=1, config_weight=1, zones_config=zones_config)
+        self.eval_plan.add(eval_config=eval_config)
+
+        zones_config: ZonesConfig = ()
+        eval_config = EvalConfig(map_type=MyMapManyWalls, nb_rounds=1, config_weight=1, zones_config=zones_config)
         self.eval_plan.add(eval_config=eval_config)
 
         eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=1)
