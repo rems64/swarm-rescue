@@ -38,7 +38,8 @@ class MyDroneEval(DroneAbstract):
         self.grabbed_person = False
         self.safe_zone = False
         self.state = "follow_wall"
-        self.pos_safe_zone = self.estimated_gps_position
+        self.spawn = True
+        self.pos_safe_zone = [0, 0]
     def define_message_for_all(self):
         """
         Here, we don't need communication...
@@ -81,6 +82,19 @@ class MyDroneEval(DroneAbstract):
             stride=angle
             speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
         return (speed, angle, stride)
+    def back_zone_gps(self,speed,angle,stride):
+        if np.min(self.walls_distances[:, 1])>30 and self.grabbed_person :
+            x1,y1=self.pos_safe_zone
+            x2,y2=self.estimated_gps_position
+            x,y=x1-x2,y1-y2
+            if x>0:
+                angle=np.arctan(y/x)-self.estimated_angle
+            elif x<0:
+                angle=-np.arctan(y/x)-self.estimated_angle
+            speed=1
+            stride=angle
+        print(speed,angle,stride)
+        return speed,angle,stride
 
     def measured_velocity(self) -> Union[np.ndarray, None]:
         """
@@ -173,8 +187,12 @@ class MyDroneEval(DroneAbstract):
         The Drone will move forward and turn for a random angle when an obstacle is hit
         """
         self.update_position()
-        self.update_distances()
         self.update_semantic()
+        self.update_distances()
+
+        if self.spawn:
+            self.spawn=False
+            self.pos_safe_zone=self.estimated_gps_position
 
         speed, angle, stride = 1.0, 0.0, 0.0
 
@@ -192,7 +210,8 @@ class MyDroneEval(DroneAbstract):
                     self.state = "follow_wall"
             case _:
                 self.state = "follow_wall"
-        speed, angle, stride = self.back_zone(speed,angle,stride)
+        speed, angle, stride = self.back_zone_gps(speed, angle, stride)
+        speed, angle, stride = self.back_zone(speed, angle, stride)
         command = {"forward": clamp(speed, -1, 1),
                    "lateral": clamp(stride, -1, 1),
                    "rotation": clamp(angle, -1, 1),
