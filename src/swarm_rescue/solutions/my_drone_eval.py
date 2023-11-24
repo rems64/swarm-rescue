@@ -59,7 +59,7 @@ class MyDroneEval(DroneAbstract):
         stride = 0
         L=[]
         for value in self.semantics:
-            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and self.grabbed_person==0:
+            if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and not value.grasped and self.grabbed_person==0:
                 L.append((value.distance, value.angle))
         if L != []:
             speed, angle = min(L)
@@ -67,6 +67,8 @@ class MyDroneEval(DroneAbstract):
                 self.grabbed_person = True
             stride = angle
             speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
+        else:
+            self.state='follow_wall'
         return (speed, angle, stride)
 
     def back_zone(self,speed,angle,stride):
@@ -83,7 +85,7 @@ class MyDroneEval(DroneAbstract):
             speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
         return (speed, angle, stride)
     def back_zone_gps(self,speed,angle,stride):
-        if np.min(self.walls_distances[:, 1])>30 and self.grabbed_person :
+        if np.min(self.walls_distances[:, 1])>50 and self.grabbed_person :
             x1,y1=self.pos_safe_zone
             x2,y2=self.estimated_gps_position
             x,y=x1-x2,y1-y2
@@ -93,7 +95,7 @@ class MyDroneEval(DroneAbstract):
                 angle=-np.arctan(y/x)-self.estimated_angle
             speed=1
             stride=angle
-        print(speed,angle,stride)
+        #print(speed,angle,stride)
         return speed,angle,stride
 
     def measured_velocity(self) -> Union[np.ndarray, None]:
@@ -195,7 +197,6 @@ class MyDroneEval(DroneAbstract):
             self.pos_safe_zone=self.estimated_gps_position
 
         speed, angle, stride = 1.0, 0.0, 0.0
-
         match self.state:
             case "follow_wall":
                 speed, angle, stride = self.follow_wall()
