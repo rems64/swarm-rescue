@@ -72,7 +72,7 @@ class MyDroneEval(DroneAbstract):
         self.spawn = True
         self.pos_safe_zone = [0, 0]
         self.pos_far_safe_zone = None
-        self.distance_map = 10000*np.ones((600, 1000))
+        self.distance_map = 10000*np.ones((100, 100))
         self.computed_points_count = 0
         self.distance_to_point_array = np.zeros(
             (self.distance_map.shape[0]*3, self.distance_map.shape[1]*3))
@@ -279,7 +279,7 @@ class MyDroneEval(DroneAbstract):
                     self.points.append(point)
 
     def update_gradient(self):
-        MAP_SCALE = 1
+        MAP_SCALE = 10
         mid_point_x = self.distance_to_point_array.shape[1]//2
         mid_point_y = self.distance_to_point_array.shape[0]//2
         for i in range(self.computed_points_count, len(self.points)):
@@ -379,7 +379,7 @@ class MyDroneEval(DroneAbstract):
 
     def display(self):
         DroneAbstract.display(self)
-        self.display_map()
+        # self.display_map()
 
     def display_map(self):
         plt.figure("map")
