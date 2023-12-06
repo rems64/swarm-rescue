@@ -105,7 +105,7 @@ class MyDroneEval(DroneAbstract):
             stride = angle
             speed = np.pi / 2 / 1 + np.exp(value.distance / 50)
         else:
-            self.state = 'go_home_path'
+            self.state = 'follow_wall'
         return (speed, angle, stride)
 
     def back_zone(self, speed, angle, stride):
@@ -265,8 +265,6 @@ class MyDroneEval(DroneAbstract):
             case "back_safe_zone":
                 speed, angle, stride = self.back_zone_gps(speed, angle, stride)
                 speed, angle, stride = self.back_zone(speed, angle, stride)
-            case "go_home_path":
-                speed, angle, stride = self.path.goHome()
             case "back_by_gps":
                 for semantic in self.semantics:
                     if semantic.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON and not self.grabbed_person:

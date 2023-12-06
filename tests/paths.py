@@ -147,18 +147,14 @@ class Line:
 class Path:
     
     def __init__(self, drone, *lines):
-        self.drone = drone
         lines = Line.reOrganize(list(lines))
         self.lines: [Line] = lines
+        self.drone = drone
         self.points = set(line.start for line in lines).union(set(line.end for line in lines))
-        # self.before = Line.getBeforeDict(lines)
-        # self.after = Line.getAfterDict(lines)
-        if self.lines:
-            self.start = self.lines[0].start
-            self.end = self.lines[-1].end
-        else: 
-            self.start = None
-            self.end = None
+        self.before = Line.getBeforeDict(lines)
+        self.after = Line.getAfterDict(lines)
+        self.start = self.lines[0].start
+        self.end = self.lines[-1].end
         
     def __str__(self):
         res = '['
@@ -172,16 +168,16 @@ class Path:
     def __len__(self):
         return sum(len(line) for line in self)
     
-    def __getitem__(self, index: int):
+    def __getitem__(self, index):
         return self.lines[index]
     
-    def __setitem__(self, index: int, line: Line):
-        self.lines[index] = line
+    def __setitem__(self, index, value):
+        self.lines[index] = value
         
-    def __delitem__(self, index: int):
+    def __delitem__(self, index):
         del self.lines[index]
     
-    def __contains__(self, line: Line):
+    def __contains__(self, line):
         return line in self.lines
     
     def append(self, point: Point):
@@ -200,7 +196,7 @@ class Path:
     
     
     def goHomeAngle(self):
-        position = Point(*self.drone.estimated_gps_position)
+        position = Point(*self.drone.estimeted_gps_position)
         line = Line.getLineFromPoint(self.lines, position)
         self.drone.estimatedAngle = line.start.getSlope(position)
 
@@ -215,3 +211,4 @@ class Path:
                 self.drone.state = "back_safe_zone"
         
         return angle, speed, stride
+
