@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.utils.misc_data import MiscData
-from spg_overlay.utils.constants import DRONE_INITIAL_HEALTH
+from spg_overlay.utils.constants import DRONE_INITIAL_HEALTH, MAX_RANGE_LIDAR_SENSOR
 
 
 def clamp(x, a, b):
@@ -72,6 +72,20 @@ class MyDroneEval(DroneAbstract):
         self.spawn = True
         self.pos_safe_zone = [0, 0]
         self.pos_far_safe_zone = None
+        self.distance_map = 10000*np.ones((100, 100))
+        self.computed_points_count = 0
+        self.distance_to_point_array = np.zeros(
+            (self.distance_map.shape[0]*3, self.distance_map.shape[1]*3))
+
+        self.generate_distance_to_point_array()
+
+    def generate_distance_to_point_array(self):
+        mid_point_x = self.distance_to_point_array.shape[1]//2
+        mid_point_y = self.distance_to_point_array.shape[0]//2
+        for (y, y_val) in enumerate(self.distance_to_point_array):
+            for (x, x_val) in enumerate(y_val):
+                self.distance_to_point_array[y][x] = distance(
+                    x, y, mid_point_x, mid_point_y)
 
     def define_message_for_all(self):
         """
@@ -87,7 +101,7 @@ class MyDroneEval(DroneAbstract):
         return False
 
     def mur_directif(self, angle):
-        return np.array([(self.lidar_values()[(demi_angle + 90)%181] * coeff(demi_angle)) for demi_angle in
+        return np.array([(self.lidar_values()[(demi_angle + 90) % 181] * coeff(demi_angle)) for demi_angle in
                          range(angle - 15, angle + 15) if
                          not self.is_person(2 * demi_angle)])
 
@@ -131,7 +145,7 @@ class MyDroneEval(DroneAbstract):
         x2, y2 = self.estimated_gps_position
         angle = anglegps(x1, y1, x2, y2) - self.estimated_angle
         angle = clamp2(angle)
-        Murs=self.mur_directif(int((180*angle/np.pi/2)))
+        Murs = self.mur_directif(int((180*angle/np.pi/2)))
         if len(Murs) >= 1 and min(Murs) < 37:
             self.state = 'follow_wall'
         speed = 1
@@ -192,11 +206,13 @@ class MyDroneEval(DroneAbstract):
             if value.entity_type == DroneSemanticSensor.TypeEntity.WOUNDED_PERSON or value.entity_type == DroneSemanticSensor.TypeEntity.GRASPED_WOUNDED_PERSON:
                 r = 12  # Radius of a person
                 alpha = np.arctan(r / value.distance)
-                self.people_ranges.append((value.angle - alpha, value.angle + alpha))
+                self.people_ranges.append(
+                    (value.angle - alpha, value.angle + alpha))
             if value.entity_type == DroneSemanticSensor.TypeEntity.DRONE:
                 r = 10  # Radius of a drone
                 alpha = np.arctan(r / value.distance)
-                self.people_ranges.append((value.angle - alpha, value.angle + alpha))
+                self.people_ranges.append(
+                    (value.angle - alpha, value.angle + alpha))
             elif value.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
                 self.safe_zone = True
 
@@ -207,7 +223,8 @@ class MyDroneEval(DroneAbstract):
         front_rays = [x[1] for x in self.walls_distances if -10 < x[0] < 10]
         distance_devant = min(front_rays) if len(front_rays) > 0 else math.inf
 
-        angle_min = self.walls_distances[np.argmin(self.walls_distances[:, 1])][0]
+        angle_min = self.walls_distances[np.argmin(
+            self.walls_distances[:, 1])][0]
         dist_min = np.min(self.walls_distances[:, 1])
 
         if time.time() - self.last_time > 0.2 or dist_min > 80:
@@ -238,6 +255,52 @@ class MyDroneEval(DroneAbstract):
 
         return (speed, angle, stride)
 
+    def update_points(self):
+        # TODO: CHANGE
+        drone_position = self.estimated_gps_position
+        drone_angle = self.estimated_angle
+
+        offset = np.array([400, 400])
+
+        WALL_POINTS_DISTANCE = 50
+        for angle, distance in self.walls_distances:
+            if distance < MAX_RANGE_LIDAR_SENSOR-10:
+                x = drone_position[0] + \
+                    np.cos(np.deg2rad(angle)+drone_angle)*distance + offset[0]
+                y = drone_position[1] + \
+                    np.sin(np.deg2rad(angle)+drone_angle)*distance + offset[1]
+                point = np.array([x, y])
+                further_enough = True
+                for point_other in self.points:
+                    if np.linalg.norm(point-point_other) < WALL_POINTS_DISTANCE:
+                        further_enough = False
+                        break
+                if further_enough:
+                    self.points.append(point)
+
+    def update_gradient(self):
+        MAP_SCALE = 10
+        mid_point_x = self.distance_to_point_array.shape[1]//2
+        mid_point_y = self.distance_to_point_array.shape[0]//2
+        for i in range(self.computed_points_count, len(self.points)):
+            point = self.points[i]
+            x_min = mid_point_x - \
+                clamp(round(point[0]/MAP_SCALE), 0,
+                      self.distance_map.shape[1]-1)
+            x_max = x_min+self.distance_map.shape[1]
+            y_min = mid_point_y - \
+                clamp(round(point[1]/MAP_SCALE), 0,
+                      self.distance_map.shape[0]-1)
+            y_max = y_min+self.distance_map.shape[0]
+            subarray = self.distance_to_point_array[y_min:y_max, x_min:x_max]
+
+            # print("x:", x_min, x_max)
+            # print("y:", y_min, y_max)
+            # print("base shape", self.distance_to_point_array.shape)
+            # print("subarray", subarray.shape)
+            self.distance_map = np.minimum(self.distance_map, subarray)
+        self.computed_points_count = len(self.points)
+
     def control(self):
         """
         The Drone will move forward and turn for a random angle when an obstacle is hit
@@ -245,6 +308,8 @@ class MyDroneEval(DroneAbstract):
         self.update_position()
         self.update_semantic()
         self.update_distances()
+        self.update_points()
+        self.update_gradient()
 
         if self.spawn:
             self.spawn = False
@@ -286,7 +351,8 @@ class MyDroneEval(DroneAbstract):
         position = self.true_position() + self._half_size_array
         width = 50
         alpha = self.drone_health / DRONE_INITIAL_HEALTH
-        color = arcade.color.GREEN if self.drone_health == DRONE_INITIAL_HEALTH else arcade.color.YELLOW if self.drone_health > DRONE_INITIAL_HEALTH / 2 else arcade.color.ORANGE if self.drone_health > DRONE_INITIAL_HEALTH / 4 else arcade.color.RED
+        color = arcade.color.GREEN if self.drone_health == DRONE_INITIAL_HEALTH else arcade.color.YELLOW if self.drone_health > DRONE_INITIAL_HEALTH / \
+            2 else arcade.color.ORANGE if self.drone_health > DRONE_INITIAL_HEALTH / 4 else arcade.color.RED
         y_offset = 30
         arcade.draw_line(position[0] - width / 2, position[1] + y_offset, position[0] + width / 2,
                          position[1] + y_offset, arcade.color.GRAY, 3)
@@ -295,7 +361,8 @@ class MyDroneEval(DroneAbstract):
 
     def draw_estimated_position(self):
         position_estimated = self.estimated_gps_position + self._half_size_array
-        arcade.draw_circle_filled(position_estimated[0], position_estimated[1], 5, arcade.color.RED)
+        arcade.draw_circle_filled(
+            position_estimated[0], position_estimated[1], 5, arcade.color.RED)
 
     def draw_wall_side(self):
         position = self.true_position() + self._half_size_array
@@ -309,3 +376,19 @@ class MyDroneEval(DroneAbstract):
         self.draw_estimated_position()
         self.draw_wall_side()
         self.draw_health()
+
+    def display(self):
+        DroneAbstract.display(self)
+        # self.display_map()
+
+    def display_map(self):
+        plt.figure("map")
+        plt.cla()
+        plt.axis(
+            (-5, self.distance_map.shape[1]+5, -5, self.distance_map.shape[0]+5))
+        plt.imshow(self.distance_map)
+        # plt.imshow(self.distance_to_point_array)
+        plt.grid(False)
+        # plt.draw()
+        # plt.show()
+        plt.pause(0.0001)
